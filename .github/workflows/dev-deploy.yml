@@ -1,0 +1,63 @@
+name: Dev Deploy
+
+on:
+  push:
+    branches:
+      - dev
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Run tests
+        working-directory: app
+        run: npm test
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build Docker image (dev)
+        working-directory: app
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/myapp:dev .
+
+      - name: Push image to Docker Hub (dev)
+        run: |
+          docker push ${{ secrets.DOCKER_USERNAME }}/myapp:dev
+
+      - name: Deploy to DEV server via SSH
+        uses: appleboy/ssh-action@v1.8.0
+        with:
+          host: ${{ secrets.DEV_SSH_HOST }}
+          username: ${{ secrets.DEV_SSH_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: ${{ secrets.DEV_SSH_PORT }}
+          script: |
+            set -e
+            docker pull ${{ secrets.DOCKER_USERNAME }}/myapp:dev
+            docker stop myapp-dev || true
+            docker rm myapp-dev || true
+            docker run -d --name myapp-dev \
+              --env-file /opt/myapp/.env.dev \
+              -p 80:3000 \
+              ${{ secrets.DOCKER_USERNAME }}/myapp:dev
